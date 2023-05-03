@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { OpenSeaPort, Network, getOrderHash, signOrderHash } from "opensea-js";
+import { OpenSeaPort, Network, getOrderHash, signOrderHash, validate, transact } from "opensea-js";
 import Web3 from "web3";
 import { osApiKey, networkName, getContract, etherscanApiKey, web3instance } from "../DataContext";
 
@@ -35,29 +35,46 @@ export async function makeOffer(account, nftContractAddress, tokenId, offerAmoun
     console.log(offerAmount);
 
     const expirationTime = Math.round(Date.now() / 1000 + 60 * 60 * 24 * 30); // 30 days from now 
+    const offerAmountInWei = Web3.utils.toWei(offerAmount.toString(), "ether");
+
+    // Check if the user has approved the contract to spend their token
+    const approvedAmount = await seaport.getTokenBalance({
+      accountAddress: account,
+      tokenAddress: nftContractAddress,
+      tokenId: tokenId,
+    });
+
+    console.log(approvedAmount);
+
+    if (approvedAmount.toNumber() < offerAmountInWei) {
+      // If the approved amount is less than the offer amount, request approval from the user
+      await seaport.approveOrder({
+        asset: {
+          tokenId: tokenId,
+          tokenAddress: nftContractAddress,
+        },
+        accountAddress: account,
+        proxyAddress: seaport._networkProxyAddress,
+        startAmount: offerAmountInWei,
+      });
+    }
+
+    // Create and execute the order
     const order = await seaport.createBuyOrder({
       asset: {
         tokenId: tokenId,
         tokenAddress: nftContractAddress,
       },
       accountAddress: account,
-      startAmount: Web3.utils.toWei(offerAmount.toString(), "ether"),
+      startAmount: offerAmountInWei,
       expirationTime: expirationTime,
     });
 
-    const orderHash = getOrderHash(order);
-    const signature = await signOrderHash(orderHash);
+    const validated = await seaport.validate([order]);
+    const transaction = await validated.transact();
+    console.log('Transaction hash: ', await transaction.wait());
 
-    const transactionHash = await seaport.fulfillOrder({
-      order: { ...order, signature },
-      accountAddress: account,
-      feeMethod: 1,
-      feeRecipientAddress: seaport._networkFeeRecipient,
-      waitForConfirmation: true,
-    });
-
-    console.log(`Transaction hash: ${transactionHash}`);
-    return transactionHash;
+    return transaction.hash;
   } catch (error) {
     console.log(`Error making offer: ${error}`);
     throw error;
