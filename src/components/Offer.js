@@ -1,69 +1,91 @@
 import React, { useState } from "react";
-import { OpenSeaPort, getOrderHashHex } from "opensea-js";
+import { OpenSeaPort, Network, getOrderHash, signOrderHash } from "opensea-js";
 import Web3 from "web3";
-import Signature from "./Signature";
-import ContractAbiFetcher from "./ContractAbiFetcher";
+import { osApiKey, networkName, getContract, etherscanApiKey, web3instance } from "../DataContext";
 
-const osApiKey = "d6a557dceac44623aad26ec5f7bf01e4";
+const etherscanApi = etherscanApiKey();
+const osApi = osApiKey();
+const opensea = require('opensea-js');
 
-const Offer = ({ contractAddress, tokenId, offerAmount, walletAddress, network, contractAbi }) => {
-  const [isLoading, setIsLoading] = useState(false);
-  const [isSuccess, setIsSuccess] = useState(false);
-  const [errorMessage, setErrorMessage] = useState("");
 
-  const provider = new Web3.providers.HttpProvider(`https://${network}.infura.io/v3/28d9ffd80cb04b8cb488e64060f0e3fe`);
-  const seaport = new OpenSeaPort(provider, {
-    networkName: network,
-    apiKey: osApiKey,
-  });
-  // const contract = new seaport.web3.eth.Contract(contractAbi, contractAddress);
-
-  const handleOffer = async (signature) => {
-    setIsLoading(true);
-
-    try {
-      const order = {
-        asset: {
-          tokenId,
-          tokenAddress: contractAddress,
-        },
-        assetBundle: null,
-        maker: walletAddress,
-        taker: "0x0000000000000000000000000000000000000000",
-        quantity: "1",
-        exchange: seaport._getExchangeContractAddress(),
-        startDate: null,
-        endDate: null,
-        paymentTokenAddress: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
-        basePrice: offerAmount,
-        extra: {},
-      };
-
-      const orderHash = getOrderHashHex(order);
-      const signedOrder = await seaport._signOrderAsync(orderHash, walletAddress, signature);
-
-      const transactionHash = await seaport.fulfillOrderAsync(signedOrder);
-      setIsSuccess(true);
-    } catch (error) {
-      setErrorMessage(error.message);
-    } finally {
-      setIsLoading(false);
+export async function makeOffer(account, nftContractAddress, tokenId, offerAmount) {
+  try {
+    // Check if a MetaMask account is connected
+    const provider = window.ethereum;
+    if (!provider) {
+      throw new Error("Please connect to MetaMask.");
     }
-  };
 
-  if (isLoading) {
-    return <p>Loading...</p>;
+    // Prompt for MetaMask account connection
+    await provider.request({ method: "eth_requestAccounts" });
+
+    const web3 = web3instance();
+    // console.log(web3.currentProvider);
+    const seaport = await new opensea.OpenSeaPort(web3.currentProvider, {
+      networkName: opensea.Network.Main,
+      apiKey: osApi,
+    });
+
+    // const accounts = await web3.eth.getAccounts();
+    // const account = accounts[0];
+
+    console.log(account);
+    console.log(nftContractAddress);
+    console.log(tokenId);
+    console.log(offerAmount);
+
+    const expirationTime = Math.round(Date.now() / 1000 + 60 * 60 * 24 * 30); // 30 days from now 
+    const order = await seaport.createBuyOrder({
+      asset: {
+        tokenId: tokenId,
+        tokenAddress: nftContractAddress,
+      },
+      accountAddress: account,
+      startAmount: Web3.utils.toWei(offerAmount.toString(), "ether"),
+      expirationTime: expirationTime,
+    });
+
+    const orderHash = getOrderHash(order);
+    const signature = await signOrderHash(orderHash);
+
+    const transactionHash = await seaport.fulfillOrder({
+      order: { ...order, signature },
+      accountAddress: account,
+      feeMethod: 1,
+      feeRecipientAddress: seaport._networkFeeRecipient,
+      waitForConfirmation: true,
+    });
+
+    console.log(`Transaction hash: ${transactionHash}`);
+    return transactionHash;
+  } catch (error) {
+    console.log(`Error making offer: ${error}`);
+    throw error;
+  }
+}
+
+function Offer(props) {
+  const [isMakingOffer, setIsMakingOffer] = useState(false);
+  const [offerResult, setOfferResult] = useState("");
+
+  async function handleMakeOffer() {
+    setIsMakingOffer(true);
+    try {
+      const transactionHash = await makeOffer(props.account, props.nftContractAddress, props.tokenId, props.offerAmount);
+      setOfferResult(`Offer successfully made. Transaction hash: ${transactionHash}`);
+    } catch (error) {
+      setOfferResult("Failed to make offer.");
+    }
+    setIsMakingOffer(false);
   }
 
-  if (isSuccess) {
-    return <p>Offer successfully submitted!</p>;
-  }
-
-  if (errorMessage) {
-    return <p>Error: {errorMessage}</p>;
-  }
-
-  return <Signature onSignature={handleOffer} />;
-};
+  return (
+    <div>
+      <button form='offerForm' type="submit" onClick={handleMakeOffer}>Make Offer</button>
+      {isMakingOffer && <p>Making offer...</p>}
+      {offerResult && <p>{offerResult}</p>}
+    </div>
+  );
+}
 
 export default Offer;
