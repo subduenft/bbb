@@ -10,14 +10,6 @@ const opensea = require('opensea-js');
 
 export async function makeOffer(account, nftContractAddress, tokenId, offerAmount) {
   try {
-    // Check if a MetaMask account is connected
-    const provider = window.ethereum;
-    if (!provider) {
-      throw new Error("Please connect to MetaMask.");
-    }
-
-    // Prompt for MetaMask account connection
-    await provider.request({ method: "eth_requestAccounts" });
 
     const web3 = web3instance();
     // console.log(web3.currentProvider);
@@ -25,9 +17,6 @@ export async function makeOffer(account, nftContractAddress, tokenId, offerAmoun
       networkName: opensea.Network.Main,
       apiKey: osApi,
     });
-
-    // const accounts = await web3.eth.getAccounts();
-    // const account = accounts[0];
 
     console.log(account);
     console.log(nftContractAddress);
